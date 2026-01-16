@@ -31,15 +31,21 @@ jobs:
         run: npx prettier --check src/
         continue-on-error: true
 
+      - name: Set ESLint outcome
+        if: always()
+        run: echo "ESLINT_OUTCOME=${{ steps.eslint.outcome }}" >> $GITHUB_ENV
+
+      - name: Set Prettier outcome
+        if: always()
+        run: echo "PRETTIER_OUTCOME=${{ steps.prettier.outcome }}" >> $GITHUB_ENV
+
       - name: Post Code Quality Report
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const eslintOutcome = steps.eslint.outcome;
-            const prettierOutcome = steps.prettier.outcome;
-            const eslintStatus = eslintOutcome === 'success' ? '✅ Passed' : '❌ Failed';
-            const prettierStatus = prettierOutcome === 'success' ? '✅ Passed' : '❌ Failed';
+            const eslintStatus = process.env.ESLINT_OUTCOME === 'success' ? '✅ Passed' : '❌ Failed';
+            const prettierStatus = process.env.PRETTIER_OUTCOME === 'success' ? '✅ Passed' : '❌ Failed';
             const body = `## Code Quality Report
 **ESLint**: ${eslintStatus}
 **Prettier**: ${prettierStatus}
@@ -51,9 +57,6 @@ jobs:
               repo: context.repo.repo,
               body: body
             });
-        env:
-          # Pass step outcomes as environment variables (they are already available via context)
-          # but we can also use ${{ }} inside script? Not needed.
 
   testing-suite:
     name: Testing Suite
@@ -71,6 +74,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install jq for parsing coverage
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Run tests with coverage
         id: test
         run: npm run test:coverage
@@ -82,21 +88,24 @@ jobs:
         run: |
           if [ -f coverage/coverage-summary.json ]; then
             COVERAGE=$(jq -r '.total.lines.pct' coverage/coverage-summary.json)
-            echo "coverage_percentage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "COVERAGE_PERCENTAGE=$COVERAGE" >> $GITHUB_ENV
             echo "Coverage: $COVERAGE%"
           else
-            echo "coverage_percentage=0" >> $GITHUB_OUTPUT
+            echo "COVERAGE_PERCENTAGE=0" >> $GITHUB_ENV
             echo "Coverage file not found"
           fi
+
+      - name: Set test outcome
+        if: always()
+        run: echo "TEST_OUTCOME=${{ steps.test.outcome }}" >> $GITHUB_ENV
 
       - name: Post Test Coverage Report
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const testOutcome = steps.test.outcome;
-            const testStatus = testOutcome === 'success' ? '✅ Passed' : '❌ Failed';
-            const coverage = steps.coverage.outputs.coverage_percentage;
+            const testStatus = process.env.TEST_OUTCOME === 'success' ? '✅ Passed' : '❌ Failed';
+            const coverage = process.env.COVERAGE_PERCENTAGE;
             const coverageText = coverage ? `${coverage}%` : 'Not available';
             const body = `## Test Coverage Report
 **Test Suite**: ${testStatus}
@@ -141,21 +150,25 @@ jobs:
       - name: Run secret scanning with Gitleaks
         id: gitleaks
         uses: gitleaks/gitleaks-action@v2
-        with:
-          config-path: .gitleaks.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
+
+      - name: Set audit outcome
+        if: always()
+        run: echo "AUDIT_OUTCOME=${{ steps.audit.outcome }}" >> $GITHUB_ENV
+
+      - name: Set gitleaks outcome
+        if: always()
+        run: echo "GITLEAKS_OUTCOME=${{ steps.gitleaks.outcome }}" >> $GITHUB_ENV
 
       - name: Post Security Scan Report
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const auditOutcome = steps.audit.outcome;
-            const gitleaksOutcome = steps.gitleaks.outcome;
-            const auditStatus = auditOutcome === 'success' ? '✅ No vulnerabilities found' : '❌ Vulnerabilities detected';
-            const gitleaksStatus = gitleaksOutcome === 'success' ? '✅ No secrets found' : '❌ Potential secrets found';
+            const auditStatus = process.env.AUDIT_OUTCOME === 'success' ? '✅ No vulnerabilities found' : '❌ Vulnerabilities detected';
+            const gitleaksStatus = process.env.GITLEAKS_OUTCOME === 'success' ? '✅ No secrets found' : '❌ Potential secrets found';
             const body = `## Security Scan Report
 **Dependencies**: ${auditStatus}
 **Secrets**: ${gitleaksStatus}
@@ -191,7 +204,10 @@ jobs:
 
       - name: Start server in background
         if: steps.build.outcome == 'success'
-        run: npm start &
+        run: |
+          npm start &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
         continue-on-error: true
 
       - name: Wait for server to be ready
@@ -204,15 +220,31 @@ jobs:
         run: npm run health-check
         continue-on-error: true
 
+      - name: Stop server
+        if: env.SERVER_PID
+        run: kill $SERVER_PID 2>/dev/null || true
+
+      - name: Set build outcome
+        if: always()
+        run: echo "BUILD_OUTCOME=${{ steps.build.outcome }}" >> $GITHUB_ENV
+
+      - name: Set validate outcome
+        if: always()
+        run: echo "VALIDATE_OUTCOME=${{ steps.validate.outcome }}" >> $GITHUB_ENV
+
       - name: Post Build Validation Report
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const buildOutcome = steps.build.outcome;
-            const validateOutcome = steps.validate ? steps.validate.outcome : 'skipped';
-            const buildStatus = buildOutcome === 'success' ? '✅ Build succeeded' : '❌ Build failed';
-            const validateStatus = validateOutcome === 'success' ? '✅ Endpoints accessible' : validateOutcome === 'skipped' ? '⚠️ Not tested' : '❌ Endpoints validation failed';
+            const buildStatus = process.env.BUILD_OUTCOME === 'success' ? '✅ Build succeeded' : '❌ Build failed';
+            const validateOutcome = process.env.VALIDATE_OUTCOME;
+            let validateStatus = '⚠️ Not tested';
+            if (validateOutcome === 'success') {
+              validateStatus = '✅ Endpoints accessible';
+            } else if (validateOutcome === 'failure') {
+              validateStatus = '❌ Endpoints validation failed';
+            }
             const body = `## Build Validation Report
 **Build**: ${buildStatus}
 **Endpoints**: ${validateStatus}
