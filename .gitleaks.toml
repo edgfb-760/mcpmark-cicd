@@ -1,0 +1,41 @@
+title = "Gitleaks configuration for mcpmark-cicd"
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(?:key|api|token|secret|password)[=:]?\s*["']?([a-z0-9_\-]{10,64})["']?'''
+tags = ["key", "api-key", "generic"]
+
+[[rules]]
+id = "github-pat"
+description = "GitHub Personal Access Token"
+regex = '''gh[pousr]_[A-Za-z0-9_]{36}'''
+tags = ["key", "github"]
+
+[[rules]]
+id = "aws-access-key-id"
+description = "AWS Access Key ID"
+regex = '''(?:AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}'''
+tags = ["key", "aws"]
+
+[[rules]]
+id = "slack-token"
+description = "Slack Token"
+regex = '''xox[baprs]-[0-9a-zA-Z]{10,48}'''
+tags = ["key", "slack"]
+
+# Exclude test files
+[[rules.exclude]]
+path = '''(.*/)?tests/.*'''
+
+# Exclude node_modules
+[[rules.exclude]]
+path = '''node_modules/.*'''
+
+# Exclude package-lock.json
+[[rules.exclude]]
+path = '''package-lock\.json'''
+
+# Exclude coverage directory
+[[rules.exclude]]
+path = '''coverage/.*'''
